@@ -1,0 +1,33 @@
+# benchpi udev rules
+# Debug probes get plugdev access; J-Link, OpenOCD and Android packages ship
+# their own rules too, these just cover common probes in one place.
+
+# ST-Link V2 / V2-1 / V3
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3748", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374e", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374f", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="3753", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# SEGGER J-Link
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1366", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# Raspberry Pi Debug Probe / Picoprobe (CMSIS-DAP)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000c", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# Generic CMSIS-DAP over HID
+KERNEL=="hidraw*", ATTRS{product}=="*CMSIS-DAP*", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# FTDI-based JTAG adapters (FT2232H/FT232H) used by OpenOCD
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6010", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# Saleae-compatible (fx2lafw) logic analyzers for sigrok
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0925", ATTRS{idProduct}=="3881", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="608c", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# benchprobe: give the Arduino running the bench probe a stable name.
+# Official Arduino boards (Uno R3, Mega, Leonardo...). For a clone board, add
+# its idVendor/idProduct and serial here, or set BENCHPROBE_PORT instead.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", SYMLINK+="benchprobe", GROUP="dialout", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2a03", SYMLINK+="benchprobe", GROUP="dialout", MODE="0660"

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# bench-status: one-shot inventory of what's attached to this bench host.
+# Agents should run this first. Use --json for machine-readable output.
+
+set -uo pipefail
+
+json=0
+[[ "${1:-}" == "--json" ]] && json=1
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+serial_ports() {
+  local p
+  if [[ -d /dev/serial/by-id ]]; then
+    for p in /dev/serial/by-id/*; do
+      [[ -e "$p" ]] && printf '%s -> %s\n' "$(basename "$p")" "$(readlink -f "$p")"
+    done
+  fi
+  [[ -e /dev/benchprobe ]] && printf 'benchprobe -> %s\n' "$(readlink -f /dev/benchprobe)"
+}
+
+adb_devices()      { have adb && adb devices 2>/dev/null | tail -n +2 | sed '/^$/d'; }
+fastboot_devices() { have fastboot && timeout 5 fastboot devices 2>/dev/null; }
+i2c_buses()        { ls /dev/i2c-* 2>/dev/null; }
+usb_devices()      { have lsusb && lsusb | grep -viE 'root hub|hub$'; }
+
+tool_versions() {
+  have openocd     && echo "openocd: $(openocd --version 2>&1 | head -1)"
+  have pyocd       && echo "pyocd: $(pyocd --version 2>&1 | head -1)"
+  have JLinkExe    && echo "jlink: installed"
+  have adb         && echo "adb: $(adb version 2>/dev/null | head -1)"
+  have fastboot    && echo "fastboot: $(fastboot --version 2>/dev/null | head -1)"
+  have sigrok-cli  && echo "sigrok-cli: $(sigrok-cli --version 2>/dev/null | head -1)"
+  have arduino-cli && echo "arduino-cli: $(arduino-cli version 2>/dev/null | head -1)"
+  have benchprobe  && echo "benchprobe: installed"
+}
+
+if [[ $json -eq 1 ]]; then
+  py=python3
+  [[ -x /opt/benchpi/venv/bin/python ]] && py=/opt/benchpi/venv/bin/python
+  S_SERIAL="$(serial_ports)"; S_ADB="$(adb_devices)"; S_FB="$(fastboot_devices)"
+  S_I2C="$(i2c_buses)"; S_USB="$(usb_devices)"; S_TOOLS="$(tool_versions)"
+  export S_SERIAL S_ADB S_FB S_I2C S_USB S_TOOLS
+  exec "$py" - <<'EOF'
+import json, os
+lines = lambda k: [l for l in os.environ.get(k, "").splitlines() if l.strip()]
+print(json.dumps({
+    "hostname": os.uname().nodename,
+    "serial_ports": lines("S_SERIAL"),
+    "adb_devices": lines("S_ADB"),
+    "fastboot_devices": lines("S_FB"),
+    "i2c_buses": lines("S_I2C"),
+    "usb_devices": lines("S_USB"),
+    "tools": lines("S_TOOLS"),
+}, indent=2))
+EOF
+fi
+
+section() { printf '\n== %s ==\n' "$1"; local out; out="$("$2")"; echo "${out:-(none)}"; }
+echo "bench host: $(hostname)"
+section "serial ports" serial_ports
+section "adb devices" adb_devices
+section "fastboot devices" fastboot_devices
+section "I2C buses on this host" i2c_buses
+section "USB devices" usb_devices
+section "tools" tool_versions
