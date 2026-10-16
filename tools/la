@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# la: logic analyzer helper around sigrok-cli, built for scripts and agents.
+#
+# Every capture is saved to a .sr file first and decoded from that file,
+# so you can re-decode the same capture with another protocol without
+# capturing again.
+#
+#   la scan                                   # find attached analyzers
+#   la capture [opts]                         # raw capture, print as bits
+#   la i2c  <scl> <sda>              [opts]   # capture + decode I2C
+#   la spi  <clk> <mosi> <miso> <cs> [opts]   # capture + decode SPI (CS active low)
+#   la uart <rx> <baud>              [opts]   # capture + decode UART
+#   la decode <file.sr> <decoder-spec>        # re-decode a saved capture
+#
+# Options:
+#   -r RATE      sample rate (default 1m; fx2lafw: 20k..24m)
+#   -t TIME      capture length, e.g. 200ms, 2s (default 500ms)
+#   -c CHANNELS  channels to capture, e.g. D0,D1 (default: the ones in use, or all)
+#   -T TRIGGER   start on a condition, e.g. D0=f (falling), D1=r, D2=0
+#   -o FILE      where to keep the capture (default /tmp/la-<time>.sr)
+#   -m MODE      spi only: clock mode 0-3 (default 0)
+#
+# Environment: LA_DRIVER (default fx2lafw), LA_CONN (e.g. 1.5 for a USB bus.addr),
+#   LA_VERBOSE=1 to show every decoder annotation (bits, start/stop bits).
+# Sample faster than the signal: at least 4x the bus clock (I2C 400 kHz -> -r 2m).
+
+set -euo pipefail
+
+DRIVER="${LA_DRIVER:-fx2lafw}"
+[[ -n "${LA_CONN:-}" ]] && DRIVER="$DRIVER:conn=$LA_CONN"
+
+die() { echo "la: $*" >&2; exit 2; }
+command -v sigrok-cli >/dev/null || die "sigrok-cli not installed (./setup.sh --only sigrok)"
+
+usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+
+# Only the annotations worth reading (no per-bit noise); set LA_VERBOSE=1 for everything.
+I2C_ANN="start:repeat-start:stop:ack:nack:address-read:address-write:data-read:data-write:warnings"
+SPI_ANN="mosi-data:miso-data:warnings"
+UART_ANN="rx-data:rx-warnings:rx-break"
+if [[ "${LA_VERBOSE:-0}" == 1 ]]; then I2C_ANN="" SPI_ANN="" UART_ANN=""; fi
+
+RATE=1m TIME=500ms CHANNELS="" TRIGGER="" OUT="" MODE=0
+parse_opts() {
+  OPTIND=1
+  while getopts ":r:t:c:T:o:m:h" opt; do
+    case "$opt" in
+      r) RATE="$OPTARG" ;;
+      t) TIME="$OPTARG" ;;
+      c) CHANNELS="$OPTARG" ;;
+      T) TRIGGER="$OPTARG" ;;
+      o) OUT="$OPTARG" ;;
+      m) MODE="$OPTARG" ;;
+      h) usage ;;
+      :) die "-$OPTARG needs a value" ;;
+      *) die "unknown option -$OPTARG" ;;
+    esac
+  done
+}
+
+capture() {
+  [[ -n "$OUT" ]] || OUT="/tmp/la-$(date +%Y%m%d-%H%M%S).sr"
+  local args=(-d "$DRIVER" -c "samplerate=$RATE" --time "$TIME" -o "$OUT")
+  [[ -n "$CHANNELS" ]] && args+=(--channels "$CHANNELS")
+  [[ -n "$TRIGGER" ]] && args+=(--triggers "$TRIGGER" --wait-trigger)
+  sigrok-cli "${args[@]}" || die "capture failed (is the analyzer plugged in? try: la scan)"
+  echo "# capture: $OUT  rate=$RATE time=$TIME${TRIGGER:+ trigger=$TRIGGER}" >&2
+}
+
+decode() { # decode <file> <decoder spec> <annotation filter>
+  local out
+  local ann="${3%=}"   # "i2c=" (verbose) -> "i2c"
+  out="$(sigrok-cli -i "$1" -P "$2" -A "$ann")"
+  if [[ -z "$out" ]]; then
+    echo "# no ${ann%%=*} traffic decoded. Check wiring, channel order and that -r is at least 4x the bus clock." >&2
+  else
+    echo "$out"
+  fi
+}
+
+cmd="${1:-}"; [[ $# -gt 0 ]] && shift
+case "$cmd" in
+  scan)
+    sigrok-cli --scan
+    ;;
+  capture)
+    parse_opts "$@"
+    capture
+    sigrok-cli -i "$OUT" -O bits:width=128
+    ;;
+  i2c)
+    [[ $# -ge 2 ]] || die "usage: la i2c <scl> <sda> [opts]"
+    scl="$1" sda="$2"; shift 2; parse_opts "$@"
+    [[ -n "$CHANNELS" ]] || CHANNELS="$scl,$sda"
+    capture
+    decode "$OUT" "i2c:scl=$scl:sda=$sda" "i2c=$I2C_ANN"
+    ;;
+  spi)
+    [[ $# -ge 4 ]] || die "usage: la spi <clk> <mosi> <miso> <cs> [opts]"
+    clk="$1" mosi="$2" miso="$3" cs="$4"; shift 4; parse_opts "$@"
+    [[ -n "$CHANNELS" ]] || CHANNELS="$clk,$mosi,$miso,$cs"
+    capture
+    cpol=$(( MODE >> 1 )) cpha=$(( MODE & 1 ))
+    decode "$OUT" "spi:clk=$clk:mosi=$mosi:miso=$miso:cs=$cs:cpol=$cpol:cpha=$cpha" "spi=$SPI_ANN"
+    ;;
+  uart)
+    [[ $# -ge 2 ]] || die "usage: la uart <rx> <baud> [opts]"
+    rx="$1" baud="$2"; shift 2; parse_opts "$@"
+    [[ -n "$CHANNELS" ]] || CHANNELS="$rx"
+    capture
+    decode "$OUT" "uart:rx=$rx:baudrate=$baud:format=ascii" "uart=$UART_ANN"
+    ;;
+  decode)
+    [[ $# -ge 2 ]] || die "usage: la decode <file.sr> <decoder-spec, e.g. i2c:scl=D0:sda=D1>"
+    decode "$1" "$2" "${2%%:*}"
+    ;;
+  ""|-h|--help|help)
+    usage
+    ;;
+  *)
+    die "unknown command '$cmd' (try: la help)"
+    ;;
+esac

@@ -7,58 +7,62 @@ engineer at someone else's bench.
 ## First, look around
 
 ```sh
-bench-status --json       # serial ports, adb/fastboot devices, probes, tools
-benchprobe info           # is the bench probe connected, and what can it do
+bench-status --json       # serial ports, adb/fastboot devices, logic analyzers, tools
 ```
 
 Don't guess which port a device is on. `/dev/serial/by-id/` names are stable;
-`/dev/ttyACM0` and `/dev/ttyUSB0` are not.
+`/dev/ttyACM0` and `/dev/ttyUSB0` are not. Ask the human how the target is
+wired (which analyzer channel goes to which signal) if it isn't written down.
 
 ## Tools available
 
 | Job | Tool |
 |---|---|
-| Serial console | `picocom -b 115200 /dev/serial/by-id/<dev>` (exit: Ctrl-A Ctrl-X). For scripted reads prefer `timeout 5 cat /dev/...` after `stty -F <dev> 115200 raw` |
+| Serial console | `picocom -b 115200 /dev/serial/by-id/<dev>` (exit: Ctrl-A Ctrl-X). For scripted reads prefer `stty -F <dev> 115200 raw` then `timeout 5 cat <dev>` |
 | Arm SWD/JTAG flash and debug | `openocd`, `pyocd`, `JLinkExe` (if installed) |
 | Android-class devices | `adb`, `fastboot` |
-| Real logic analyzers | `sigrok-cli` |
-| GPIO / ADC / I2C / SPI / UART probing | `benchprobe` (see below) |
-| Arduino builds | `arduino-cli` |
+| Logic analyzer: capture and protocol decode | `la` (wraps `sigrok-cli`) |
 
-## benchprobe
+## Logic analyzer (`la`)
 
-The arguments are the protocol line, and the reply is one line of JSON.
-Reference: `benchprobe/PROTOCOL.md`.
+The analyzer is an 8-channel, 24 MHz FX2 device (sigrok driver `fx2lafw`),
+with channels `D0`–`D7`.
 
 ```sh
-benchprobe i2c scan                         # what's on the bus
-benchprobe i2c read 0x68 1 0x75             # WHO_AM_I-style register read
-benchprobe spi cfg 1000000 0 && benchprobe spi xfer 10 0x9f 0 0 0
-benchprobe adc A0 32                        # averaged voltage
-benchprobe watch 2,3 1000                   # edges on two pins for 1 s
-benchprobe --ascii cap 2,3,4 300 20         # logic capture; waveform on stderr
-benchprobe run "pin 7 pullup" "read 7"      # several commands, one session
+la scan                                   # confirm it's connected
+la i2c D0 D1 -r 2m -t 200ms               # SCL, SDA
+la spi D0 D1 D2 D3 -r 8m -m 0             # CLK, MOSI, MISO, CS; SPI mode 0-3
+la uart D4 115200 -r 1m -t 1s             # RX, baud
+la capture -c D0,D1 -r 1m -t 10ms         # raw bits
+la i2c D0 D1 -T D1=f                      # trigger: SDA falling edge
+la decode <file.sr> i2c:scl=D0:sda=D1     # re-decode a saved capture
+LA_VERBOSE=1 la i2c D0 D1                 # every annotation, bit level
 ```
 
-Exit code 0 means ok, 1 means the device refused, and 2 means it couldn't be reached.
+Every capture is saved (path printed on stderr as `# capture: ...`), so re-decode
+it instead of capturing again. `la` exits 2 when it can't capture.
+
+How to read results:
+- **Sample rate:** at least 4× the bus clock. Too slow, and decodes come out
+  garbled or empty.
+- **Empty decode:** if `la` prints `no ... traffic decoded`, check in this
+  order: the right channels, the rate, a trigger that never fired, and whether
+  the bus was actually active during the window.
+- **1.8 V signals:** the analyzer's logic-high threshold is 2.0 V, so 1.8 V
+  signals will look stuck low or noisy. Report that rather than a "dead" bus.
 
 ## Rules
 
 1. **Reversible actions are fine; irreversible ones need a human.** Flashing
    application firmware, resetting, reading logs, reading registers and
-   probing pins are all fine. Ask first before:
+   capturing signals are all fine. Ask first before:
    - mass-erasing a chip
    - writing option bytes or eFuses, or enabling read-out protection or secure boot
    - `fastboot flash` to bootloader or partition-table partitions, or `fastboot oem` / `flashing unlock`
    - anything that would brick a board or void its security state
-2. **Mind voltages.** Check `benchprobe info` and the target's I/O voltage
-   before driving a pin into it. A 5 V probe board can damage a 3.3 V part.
-3. **Don't drive pins you didn't configure.** Only `write` or `pwm` pins that
-   the human told you are wired for it. Reading is safe; driving can short
-   outputs together.
-4. **Report what you measured, not what you expected.** If a capture doesn't
-   show the signal, say so. Software sampling has limits (`poll_us` in each
-   reply), so a missing edge may be too fast for the probe. Suggest a real
-   logic analyzer.
-5. **Leave the bench as you found it.** Close consoles, stop debug servers
-   (`pkill openocd`), and don't leave pins driven high unless asked.
+2. **Mind voltages.** The analyzer tolerates up to 5.25 V on its inputs. Don't
+   ask a human to clip it onto anything higher.
+3. **Report what you measured, not what you expected.** If a capture doesn't
+   show the signal, say so, and give the rate, window and channels you used.
+4. **Leave the bench as you found it.** Close consoles, stop debug servers
+   (`pkill openocd`), and clean up large capture files you no longer need.

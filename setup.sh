@@ -16,7 +16,7 @@ BENCHPI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCHPI_PREFIX="${BENCHPI_PREFIX:-/opt/benchpi}"
 VENV="$BENCHPI_PREFIX/venv"
 
-DEFAULT_COMPONENTS="base python udev serial adb openocd pyocd sigrok arduino probe"
+DEFAULT_COMPONENTS="base python udev serial adb openocd pyocd sigrok tools"
 ALL_COMPONENTS="$DEFAULT_COMPONENTS jlink ssm"
 
 ACCEPT_JLINK_LICENSE="${ACCEPT_JLINK_LICENSE:-0}"
@@ -138,36 +138,16 @@ install_pyocd() {
 }
 
 install_sigrok() {
-  log "sigrok-cli (for real USB logic analyzers)"
-  apt_install sigrok-cli
+  log "sigrok-cli and FX2 logic analyzer firmware"
+  # fx2lafw firmware covers the common 24 MHz / 8-channel analyzers
+  # (SparkFun TOL-18627, Saleae Logic clones, etc.).
+  apt_install sigrok-cli sigrok-firmware-fx2lafw
 }
 
-install_arduino() {
-  log "arduino-cli"
-  if ! command -v arduino-cli >/dev/null; then
-    local tmp
-    tmp="$(mktemp -d)"
-    curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh -o "$tmp/install.sh"
-    $SUDO env BINDIR=/usr/local/bin sh "$tmp/install.sh"
-    rm -rf "$tmp"
-  fi
-  # Core for the default probe board (Uno/Nano). Add others with
-  #   arduino-cli core install <core>
-  sudo -u "$BENCH_USER" -H arduino-cli core update-index
-  sudo -u "$BENCH_USER" -H arduino-cli core install arduino:avr
-}
-
-install_probe() {
-  log "benchprobe CLI and bench-status"
-  [[ -x "$VENV/bin/python" ]] || install_python
-  local wrapper=/usr/local/bin/benchprobe
-  $SUDO tee "$wrapper" >/dev/null <<EOF
-#!/bin/sh
-exec "$VENV/bin/python" "$BENCHPI_DIR/benchprobe/host/benchprobe.py" "\$@"
-EOF
-  $SUDO chmod 0755 "$wrapper"
+install_tools() {
+  log "bench-status and la (logic analyzer helper)"
   link_bin "$BENCHPI_DIR/tools/bench-status" bench-status
-  link_bin "$BENCHPI_DIR/tools/flash-probe" flash-probe
+  link_bin "$BENCHPI_DIR/tools/la" la
 }
 
 install_jlink() {

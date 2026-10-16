@@ -22,12 +22,6 @@ KERNEL=="hidraw*", ATTRS{product}=="*CMSIS-DAP*", MODE="0660", GROUP="plugdev", 
 SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6010", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6014", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 
-# Saleae-compatible (fx2lafw) logic analyzers for sigrok
+# FX2-based (fx2lafw) logic analyzers for sigrok, e.g. SparkFun TOL-18627
 SUBSYSTEM=="usb", ATTRS{idVendor}=="0925", ATTRS{idProduct}=="3881", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="608c", MODE="0660", GROUP="plugdev", TAG+="uaccess"
-
-# benchprobe: give the Arduino running the bench probe a stable name.
-# Official Arduino boards (Uno R3, Mega, Leonardo...). For a clone board, add
-# its idVendor/idProduct and serial here, or set BENCHPROBE_PORT instead.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", SYMLINK+="benchprobe", GROUP="dialout", MODE="0660"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="2a03", SYMLINK+="benchprobe", GROUP="dialout", MODE="0660"

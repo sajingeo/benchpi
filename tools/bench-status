@@ -16,12 +16,12 @@ serial_ports() {
       [[ -e "$p" ]] && printf '%s -> %s\n' "$(basename "$p")" "$(readlink -f "$p")"
     done
   fi
-  [[ -e /dev/benchprobe ]] && printf 'benchprobe -> %s\n' "$(readlink -f /dev/benchprobe)"
 }
 
 adb_devices()      { have adb && adb devices 2>/dev/null | tail -n +2 | sed '/^$/d'; }
 fastboot_devices() { have fastboot && timeout 5 fastboot devices 2>/dev/null; }
 i2c_buses()        { ls /dev/i2c-* 2>/dev/null; }
+logic_analyzers()  { have sigrok-cli && timeout 10 sigrok-cli --scan 2>/dev/null | grep -v '^The following devices'; }
 usb_devices()      { have lsusb && lsusb | grep -viE 'root hub|hub$'; }
 
 tool_versions() {
@@ -31,16 +31,15 @@ tool_versions() {
   have adb         && echo "adb: $(adb version 2>/dev/null | head -1)"
   have fastboot    && echo "fastboot: $(fastboot --version 2>/dev/null | head -1)"
   have sigrok-cli  && echo "sigrok-cli: $(sigrok-cli --version 2>/dev/null | head -1)"
-  have arduino-cli && echo "arduino-cli: $(arduino-cli version 2>/dev/null | head -1)"
-  have benchprobe  && echo "benchprobe: installed"
+  have la          && echo "la: installed"
 }
 
 if [[ $json -eq 1 ]]; then
   py=python3
   [[ -x /opt/benchpi/venv/bin/python ]] && py=/opt/benchpi/venv/bin/python
   S_SERIAL="$(serial_ports)"; S_ADB="$(adb_devices)"; S_FB="$(fastboot_devices)"
-  S_I2C="$(i2c_buses)"; S_USB="$(usb_devices)"; S_TOOLS="$(tool_versions)"
-  export S_SERIAL S_ADB S_FB S_I2C S_USB S_TOOLS
+  S_I2C="$(i2c_buses)"; S_LA="$(logic_analyzers)"; S_USB="$(usb_devices)"; S_TOOLS="$(tool_versions)"
+  export S_SERIAL S_ADB S_FB S_I2C S_LA S_USB S_TOOLS
   exec "$py" - <<'EOF'
 import json, os
 lines = lambda k: [l for l in os.environ.get(k, "").splitlines() if l.strip()]
@@ -50,6 +49,7 @@ print(json.dumps({
     "adb_devices": lines("S_ADB"),
     "fastboot_devices": lines("S_FB"),
     "i2c_buses": lines("S_I2C"),
+    "logic_analyzers": lines("S_LA"),
     "usb_devices": lines("S_USB"),
     "tools": lines("S_TOOLS"),
 }, indent=2))
@@ -62,5 +62,6 @@ section "serial ports" serial_ports
 section "adb devices" adb_devices
 section "fastboot devices" fastboot_devices
 section "I2C buses on this host" i2c_buses
+section "logic analyzers" logic_analyzers
 section "USB devices" usb_devices
 section "tools" tool_versions
